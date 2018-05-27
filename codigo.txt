@@ -1,0 +1,89 @@
+---------------------
+Se arma la estructura
+---------------------
+hdfs dfs -rmdir /credito
+hdfs dfs -mkdir /credito
+hdfs dfs -ls /
+
+hdfs dfs -mkdir /credito/landing
+hdfs dfs -mkdir /credito/transformation
+hdfs dfs -mkdir /credito/reports
+
+hdfs dfs -ls /credito/
+---------------------------
+Se crean las tablas en hive
+---------------------------
+create database credito;
+create external table if not exists credito.riesgo
+(
+customerid INT COMMENT 'Identificador del cliente',
+antiguedad INT COMMENT 'Antiguedad del cliente en meses',
+nivel_ingreso INT COMMENT 'Nivel de ingrego de 0 bajo a 5 alto',
+saldo_pendiente INT COMMENT 'Saldo pendiente',
+tasa_morosidad INT COMMENT 'Tasa de morosidad',
+operaciones_morosas INT COMMENT 'Operaciones no bancarias morosas',
+risk INT COMMENT '0 Buen Pagado 1 Mal Pagador'
+)
+COMMENT 'Table de Riesgo por cliente'
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+LINES TERMINATED BY '\n'
+STORED AS TEXTFILE
+LOCATION '/credito/reports';
+
+create external table if not exists credito.bloqueados
+(
+customerid INT COMMENT 'Identificador del cliente',
+motivo STRING COMMENT 'Lavado de Activos, Financiamiento del terrorismo',
+fecha DATE COMMENT 'Fecha de bloqueo'
+)
+COMMENT 'Tabla de clientes bloqueados'
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+LINES TERMINATED BY '\n'
+STORED AS TEXTFILE
+LOCATION '/credito/reports';
+
+create external table if not exists credito.solicitudes
+(
+solicitudid INT COMMENT 'Identificador de la solicitud',
+customerid INT COMMENT 'Identificador del cliente',
+tipo INT COMMENT '1 efectivo, 2 hipotecario, 3 vehicular, 4 otros',
+fecha DATE COMMENT 'Fecha de solicitud',
+medios INT COMMENT '1 presencial, 2 online, 3 telefono',
+monto DOUBLE COMMENT 'monto solicitado'
+)
+COMMENT 'Tabla de clientes bloqueados'
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+LINES TERMINATED BY '\n'
+STORED AS TEXTFILE
+LOCATION '/credito/reports';
+------------------
+ANALISIS CON SPARK
+------------------
+val df = spark.read.format("csv").option("inferSchema", "true").option("header","true").load("/FileStore/tables/riesgo.csv")
+df.show
+
+df.createOrReplaceTempView("riesgo")
+val sqlWay = spark.sql("""
+SELECT CASE risk WHEN 0 THEN 'BUEN PAGADOR' WHEN 1 THEN 'MAL PAGADOR' END AS estado, COUNT(1) AS cantidad
+FROM riesgo
+GROUP BY risk
+""")
+sqlWay.show()
+
+import org.apache.spark.sql.functions._
+val dataFrameWay =  df.groupBy("nivel_ingreso").count()
+dataFrameWay.sort(col("nivel_ingreso")).show()
+------------------
+ANALISIS CON HBASE
+------------------
+cd cloud-bigtable-examples/quickstart
+./quickstart.sh
+disable 'bloqueados'
+drop 'bloqueados'
+create 'bloqueados', 'motivo', 'fecha'
+put 'bloqueados', 'row1', 'motivo:lavado', '01/01/2014'
+get 'bloqueados', 'row1'
+
